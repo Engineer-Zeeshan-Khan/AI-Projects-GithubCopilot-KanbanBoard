@@ -16,7 +16,9 @@
 
 - Implemented as a modern NextJS app, client rendered
 - The NextJS app should be created in a subdirectory `frontend`
-- No persistence
+- Persist board changes in the browser so the same user can return to them later
+- The app should open with dummy data populated for the single board on first use
+- Browser-local persistence only; no backend or cross-device synchronization for the MVP
 - No user management for the MVP
 - Use popular libraries
 - As simple as possible but with an elegant UI

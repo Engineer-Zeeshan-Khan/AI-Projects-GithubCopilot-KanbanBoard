@@ -1,0 +1,34 @@
+node_modules
+.next
+out
+coverage
+playwright-report
+test-results
+blob-report
+.DS_Store
+*.pem
+.env*
+*.tsbuildinfo
+next-env.d.ts
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+
+# Editors and operating systems
+.DS_Store
+.vscode/
+
+# Generated files
+logs/
+*.log

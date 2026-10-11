@@ -1,5 +1,25 @@
 # Kanban Project Manager
 
+## Run the app
+
+```
+cd frontend
+npm ci
+npm run dev
+```
+
+Open http://localhost:3000. Board changes remain in this browser on this device after the site stops. Select **Save snapshot & turn off** to append the board to `frontend/data/kanban-board-history.xlsx` and stop the Next.js server. Each click appends a dated row for every card.
+
+The app binds to this Mac only. Board data is stored in browser storage and the local Excel workbook; the snapshot button sends it only to the local app endpoint. Next.js telemetry is disabled in the npm scripts. The build may fetch the configured Geist font from Google, but that request does not include board data.
+
+To turn the site back on, run this one-line command from Terminal:
+
+```sh
+cd /Users/zeeshankhan/CODE/kanban/frontend && npm run dev
+```
+
+The snapshot can only be appended when the site is running and you select the button. If the Mac loses power before that, the current board remains in browser storage, but no new Excel snapshot is created.
+
 ## Instructions
 
 This is a skeleton project to be the basis for your Kanban project for Week 1 of the Complete AI Coder Course. See the course resources for more.
