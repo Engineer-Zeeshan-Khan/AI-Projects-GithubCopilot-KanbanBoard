@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import styles from "./page.module.css";
 import {
   addCardToColumn,
+  createCardReference,
   createInitialBoard,
   deleteCard,
   formatBoardDate,
@@ -17,6 +18,7 @@ import {
   updateCard,
   type Board,
   type Card,
+  type CardComment,
   type ColumnId,
 } from "./lib/board";
 
@@ -35,6 +37,52 @@ const emptyDraft: CardDraft = {
   dueDate: "",
   priority: null,
 };
+
+type CardChangeAction = "Created" | "Deleted" | "Moved" | "Reordered" | "Comment added" | "Comment deleted";
+type CardChangePayload = {
+  action: CardChangeAction;
+  cardBefore?: Card;
+  cardAfter?: Card;
+  columnBefore?: string;
+  columnAfter?: string;
+  changedFields: string[];
+  commentId?: string;
+  commentText?: string;
+};
+
+async function recordCardChange(event: CardChangePayload) {
+  const response = await fetch("/api/board/card-change", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(event),
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error);
+  }
+}
+
+async function recordOverdueCardMoves(before: Board, after: Board) {
+  const backlog = after.columns.find((column) => column.id === "backlog");
+  if (!backlog) return;
+
+  const backlogIds = new Set(backlog.cards.map((card) => card.id));
+  const movedCards = before.columns
+    .filter((column) => column.id !== "backlog" && column.id !== "done")
+    .flatMap((column) => column.cards
+      .filter((card) => backlogIds.has(card.id))
+      .map((card) => ({ card, column })));
+
+  await Promise.all(movedCards.map(({ card, column }) => recordCardChange({
+    action: "Moved",
+    cardBefore: card,
+    cardAfter: card,
+    columnBefore: column.title,
+    columnAfter: backlog.title,
+    changedFields: ["column", "due time passed"],
+  })));
+}
+
 const boardStorageKey = "kanban-board";
 const teamProfileStorageKey = "kanban-team-profile";
 type TeamProfile = { name: string; logo: string };
@@ -208,6 +256,7 @@ export default function Home() {
   const [isTurningOff, setIsTurningOff] = useState(false);
   const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
   const [snapshotSavedFor, setSnapshotSavedFor] = useState<string | null>(null);
+  const [isCreatingCard, setIsCreatingCard] = useState(false);
   const [boardMessage, setBoardMessage] = useState("");
   const [boardError, setBoardError] = useState("");
   const [editingCard, setEditingCard] = useState<{
@@ -216,6 +265,9 @@ export default function Home() {
     draft: Card;
   } | null>(null);
   const [savingCardId, setSavingCardId] = useState<string | null>(null);
+  const [openCommentCardId, setOpenCommentCardId] = useState<string | null>(null);
+  const [commentDraft, setCommentDraft] = useState("");
+  const commentsPanelRef = useRef<HTMLDivElement>(null);
   const [isAddingCard, setIsAddingCard] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [teamNameDraft, setTeamNameDraft] = useState("Weekly Team");
@@ -228,7 +280,9 @@ export default function Home() {
     const currentBoard = getBoardSnapshot();
     const overdueBoard = moveOverdueCards(currentBoard);
     if (overdueBoard !== currentBoard) {
-      updateBoard(() => overdueBoard);
+      void recordOverdueCardMoves(currentBoard, overdueBoard)
+        .then(() => updateBoard(() => overdueBoard))
+        .catch((error: unknown) => setBoardError(error instanceof Error ? error.message : "Could not record overdue moves."));
     } else {
       syncBoard(currentBoard);
     }
@@ -237,12 +291,30 @@ export default function Home() {
       const latestBoard = getBoardSnapshot();
       const updatedBoard = moveOverdueCards(latestBoard);
       if (updatedBoard !== latestBoard) {
-        updateBoard(() => updatedBoard);
+        void recordOverdueCardMoves(latestBoard, updatedBoard)
+          .then(() => updateBoard(() => updatedBoard))
+          .catch((error: unknown) => setBoardError(error instanceof Error ? error.message : "Could not record overdue moves."));
       }
     }, 60_000);
 
     return () => clearInterval(overdueTimer);
   }, []);
+
+  useEffect(() => {
+    if (!openCommentCardId) {
+      return;
+    }
+
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (event.target instanceof Node && !commentsPanelRef.current?.contains(event.target)) {
+        setOpenCommentCardId(null);
+        setCommentDraft("");
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
+  }, [openCommentCardId]);
 
   const handleBoardAction = async (action: "snapshot" | "off") => {
     const shuttingDown = action === "off";
@@ -291,7 +363,7 @@ export default function Home() {
     }));
   };
 
-  const handleAddCard = () => {
+  const handleAddCard = async () => {
     const title = draft.title.trim();
 
     if (!title) {
@@ -300,17 +372,33 @@ export default function Home() {
 
     const newCard: Card = {
       id: `todo-${Date.now()}`,
+      cardRef: createCardReference(),
       title,
       details: draft.details.trim() || "No additional details.",
       assignee: draft.assignee.trim(),
       dueDate: draft.dueDate,
       priority: draft.priority,
       createdAt: new Date().toISOString(),
+      comments: [],
     };
 
-    updateBoard((current) => addCardToColumn(current, "todo", newCard));
-    setDraft({ ...emptyDraft });
-    setIsAddingCard(false);
+    setIsCreatingCard(true);
+    setBoardError("");
+    try {
+      await recordCardChange({
+        action: "Created",
+        cardAfter: newCard,
+        columnAfter: newCard.dueDate && newCard.dueDate.slice(0, 10) < localDateString() ? "Backlog" : "To Do",
+        changedFields: ["title", "details", "owner", "due on", "priority"],
+      });
+      updateBoard((current) => addCardToColumn(current, "todo", newCard));
+      setDraft({ ...emptyDraft });
+      setIsAddingCard(false);
+    } catch (error) {
+      setBoardError(error instanceof Error ? error.message : "Could not record the new card.");
+    } finally {
+      setIsCreatingCard(false);
+    }
   };
 
   const handleSaveTeamProfile = () => {
@@ -342,8 +430,26 @@ export default function Home() {
     updateBoard((current) => renameColumn(current, columnId, title));
   };
 
-  const handleDelete = (columnId: ColumnId, cardId: string) => {
-    updateBoard((current) => deleteCard(current, columnId, cardId));
+  const handleDelete = async (columnId: ColumnId, cardId: string) => {
+    const column = board.columns.find((item) => item.id === columnId);
+    const card = column?.cards.find((item) => item.id === cardId);
+    if (!column || !card) return;
+
+    setSavingCardId(cardId);
+    setBoardError("");
+    try {
+      await recordCardChange({
+        action: "Deleted",
+        cardBefore: card,
+        columnBefore: column.title,
+        changedFields: ["deleted"],
+      });
+      updateBoard((current) => deleteCard(current, columnId, cardId));
+    } catch (error) {
+      setBoardError(error instanceof Error ? error.message : "Could not record card deletion.");
+    } finally {
+      setSavingCardId(null);
+    }
   };
 
   const handleEditCard = (columnId: ColumnId, card: Card) => {
@@ -359,7 +465,8 @@ export default function Home() {
     const currentCard = board.columns
       .find((column) => column.id === editingCard.columnId)
       ?.cards.find((card) => card.id === editingCard.cardId);
-    if (!currentCard) {
+    const currentColumn = board.columns.find((column) => column.id === editingCard.columnId);
+    if (!currentCard || !currentColumn) {
       setEditingCard(null);
       return;
     }
@@ -367,18 +474,39 @@ export default function Home() {
     setSavingCardId(editingCard.cardId);
     setBoardError("");
     try {
+      const afterCard = { ...editingCard.draft };
+      const changedFields: string[] = (["title", "details", "assignee", "dueDate", "priority"] as const)
+        .filter((field) => currentCard[field] !== afterCard[field])
+        .map((field) => field === "assignee" ? "owner" : field === "dueDate" ? "due on" : field);
+      const movesToBacklog = Boolean(afterCard.dueDate) &&
+        afterCard.dueDate!.slice(0, 10) < localDateString() &&
+        currentColumn.id !== "backlog" && currentColumn.id !== "done";
+      if (movesToBacklog) changedFields.push("column");
+      if (changedFields.length === 0) {
+        setEditingCard(null);
+        return;
+      }
+
       const response = await fetch("/api/board/card-edit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ card: currentCard, columnTitle }),
+        body: JSON.stringify({
+          before: currentCard,
+          after: afterCard,
+          columnBefore: currentColumn.title,
+          columnAfter: movesToBacklog ? "Backlog" : columnTitle,
+          changedFields,
+        }),
       });
       const result = await response.json();
       if (!response.ok) {
         throw new Error(result.error);
       }
 
-      const { assignee, dueDate, priority } = editingCard.draft;
+      const { title, details, assignee, dueDate, priority } = afterCard;
       updateBoard((current) => updateCard(current, editingCard.columnId, editingCard.cardId, {
+        title,
+        details,
         assignee,
         dueDate,
         priority,
@@ -391,21 +519,101 @@ export default function Home() {
     }
   };
 
-  const handleDrop = (targetColumnId: ColumnId, targetIndex?: number) => {
+  const handleAddComment = async (columnId: ColumnId, card: Card) => {
+    const text = commentDraft.trim();
+    if (!text) return;
+
+    const column = board.columns.find((item) => item.id === columnId);
+    if (!column) return;
+
+    const comment: CardComment = {
+      id: crypto.randomUUID(),
+      text,
+      createdAt: new Date().toISOString(),
+    };
+    const cardAfter = { ...card, comments: [...(card.comments ?? []), comment] };
+
+    try {
+      await recordCardChange({
+        action: "Comment added",
+        cardBefore: card,
+        cardAfter,
+        columnBefore: column.title,
+        columnAfter: column.title,
+        changedFields: ["comments"],
+        commentId: comment.id,
+        commentText: comment.text,
+      });
+      updateBoard((current) => updateCard(current, columnId, card.id, { comments: cardAfter.comments }));
+      setCommentDraft("");
+    } catch (error) {
+      setBoardError(error instanceof Error ? error.message : "Could not record the comment.");
+    }
+  };
+
+  const handleDeleteComment = async (columnId: ColumnId, card: Card, comment: CardComment) => {
+    const column = board.columns.find((item) => item.id === columnId);
+    if (!column) return;
+
+    const cardAfter = { ...card, comments: (card.comments ?? []).filter((item) => item.id !== comment.id) };
+    try {
+      await recordCardChange({
+        action: "Comment deleted",
+        cardBefore: card,
+        cardAfter,
+        columnBefore: column.title,
+        columnAfter: column.title,
+        changedFields: ["comments"],
+        commentId: comment.id,
+        commentText: comment.text,
+      });
+      updateBoard((current) => updateCard(current, columnId, card.id, { comments: cardAfter.comments }));
+    } catch (error) {
+      setBoardError(error instanceof Error ? error.message : "Could not record the comment deletion.");
+    }
+  };
+
+  const handleDrop = async (targetColumnId: ColumnId, targetIndex?: number) => {
     if (!draggedCard) {
       return;
     }
 
-    updateBoard((current) =>
-      moveCardBetweenColumns(
+    const fromColumn = board.columns.find((column) => column.id === draggedCard.fromColumnId);
+    const toColumn = board.columns.find((column) => column.id === targetColumnId);
+    const cardBefore = fromColumn?.cards.find((card) => card.id === draggedCard.cardId);
+    if (!fromColumn || !toColumn || !cardBefore) {
+      setDraggedCard(null);
+      return;
+    }
+
+    const fromIndex = fromColumn.cards.findIndex((card) => card.id === cardBefore.id);
+    if (fromColumn.id === toColumn.id && (targetIndex === undefined || targetIndex === fromIndex)) {
+      setDraggedCard(null);
+      return;
+    }
+
+    const cardChangeAction = fromColumn.id === toColumn.id ? "Reordered" : "Moved";
+    try {
+      await recordCardChange({
+        action: cardChangeAction,
+        cardBefore,
+        cardAfter: cardBefore,
+        columnBefore: fromColumn.title,
+        columnAfter: toColumn.title,
+        changedFields: [cardChangeAction === "Moved" ? "column" : "order"],
+      });
+      updateBoard((current) => moveCardBetweenColumns(
         current,
         draggedCard.fromColumnId,
         targetColumnId,
         draggedCard.cardId,
         targetIndex,
-      ),
-    );
-    setDraggedCard(null);
+      ));
+    } catch (error) {
+      setBoardError(error instanceof Error ? error.message : "Could not record card movement.");
+    } finally {
+      setDraggedCard(null);
+    }
   };
 
   return (
@@ -490,7 +698,9 @@ export default function Home() {
               <option value={2}>Priority 2</option>
               <option value={3}>Priority 3</option>
             </select>
-            <button type="submit" className={styles.createCardButton}>Create card</button>
+            <button type="submit" className={styles.createCardButton} disabled={isCreatingCard}>
+              {isCreatingCard ? "Recording..." : "Create card"}
+            </button>
           </form>
         )}
         {customizeOpen && (
@@ -582,7 +792,7 @@ export default function Home() {
                 <article
                   key={card.id}
                   className={`${styles.card} ${priorityClass}`}
-                  draggable={!isEditing}
+                  draggable={!isEditing && openCommentCardId !== card.id}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => {
                     event.preventDefault();
@@ -596,41 +806,77 @@ export default function Home() {
                   onDragEnd={() => setDraggedCard(null)}
                 >
                   <div className={styles.cardTopRow}>
-                    <h3>{card.title}</h3>
+                    <div className={styles.cardIdentity}>
+                      {isEditing ? (
+                        <input
+                          className={styles.cardTitleInput}
+                          aria-label={`Title for ${card.title}`}
+                          value={editingCard.draft.title}
+                          onChange={(event) => setEditingCard({ ...editingCard, draft: { ...editingCard.draft, title: event.target.value } })}
+                        />
+                      ) : (
+                        <h3>{card.title}</h3>
+                      )}
+                      <span className={styles.cardReference}>{card.cardRef}</span>
+                    </div>
                     <div className={styles.cardActions}>
-                    <button
-                      type="button"
-                      className={styles.editButton}
-                      aria-label={`${isEditing ? "Cancel editing" : "Edit"} ${card.title}`}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={() => isEditing ? setEditingCard(null) : handleEditCard(column.id, card)}
-                      disabled={savingCardId === card.id}
-                    >
-                      {isEditing ? "Cancel" : "Edit"}
-                    </button>
-                    {isEditing && (
                       <button
                         type="button"
-                        className={styles.saveCardButton}
+                        className={styles.editButton}
+                        aria-label={`${isEditing ? "Cancel editing" : "Edit"} ${card.title}`}
                         onPointerDown={(event) => event.stopPropagation()}
-                        onClick={() => void handleSaveCardEdit(column.title)}
+                        onClick={() => isEditing ? setEditingCard(null) : handleEditCard(column.id, card)}
                         disabled={savingCardId === card.id}
                       >
-                        {savingCardId === card.id ? "Saving..." : "Save"}
+                        {isEditing ? "Cancel" : "Edit"}
                       </button>
-                    )}
+                      {isEditing && (
+                        <button
+                          type="button"
+                          className={styles.saveCardButton}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={() => void handleSaveCardEdit(column.title)}
+                          disabled={savingCardId === card.id}
+                        >
+                          {savingCardId === card.id ? "Saving..." : "Save"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className={styles.deleteButton}
+                        aria-label={`Delete ${card.title}`}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={() => void handleDelete(column.id, card.id)}
+                        disabled={savingCardId === card.id}
+                      >
+                        ×
+                      </button>
+                    </div>
                     <button
                       type="button"
-                      className={styles.deleteButton}
-                      aria-label={`Delete ${card.title}`}
+                      className={styles.commentsButton}
+                      aria-expanded={openCommentCardId === card.id}
+                      aria-label={`Updates for ${card.title}, ${(card.comments ?? []).length} comments`}
                       onPointerDown={(event) => event.stopPropagation()}
-                      onClick={() => handleDelete(column.id, card.id)}
+                      onClick={() => {
+                        setOpenCommentCardId(openCommentCardId === card.id ? null : card.id);
+                        setCommentDraft("");
+                      }}
                     >
-                      ×
+                      <span aria-hidden="true">◷</span> Updates{(card.comments ?? []).length > 0 ? ` · ${(card.comments ?? []).length}` : ""}
                     </button>
-                    </div>
                   </div>
-                  <p>{card.details}</p>
+                  {isEditing ? (
+                    <textarea
+                      className={styles.cardDetailsInput}
+                      aria-label={`Details for ${card.title}`}
+                      value={editingCard.draft.details}
+                      rows={3}
+                      onChange={(event) => setEditingCard({ ...editingCard, draft: { ...editingCard.draft, details: event.target.value } })}
+                    />
+                  ) : (
+                    <p>{card.details}</p>
+                  )}
                   <div className={styles.cardMeta}>
                     {card.assignee && <span className={styles.assignee}>Owner: {card.assignee}</span>}
                     {card.priority && (
@@ -644,6 +890,49 @@ export default function Home() {
                     </span>
                     {card.dueDate && <span className={styles.dueDate}>Due on {formatDueDate(card.dueDate)}</span>}
                   </div>
+                  {openCommentCardId === card.id && (
+                    <div
+                      className={styles.commentsPanel}
+                      ref={commentsPanelRef}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      role="region"
+                      aria-label={`Updates for ${card.title}`}
+                    >
+                      <div className={styles.commentsList}>
+                        {(card.comments ?? []).map((comment) => (
+                          <article key={comment.id} className={styles.commentEntry}>
+                            <p>{comment.text}</p>
+                            <time>{formatCreatedDate(comment.createdAt)}</time>
+                            <button
+                              type="button"
+                              aria-label={`Delete comment ${comment.id}`}
+                              onClick={() => void handleDeleteComment(column.id, card, comment)}
+                            >
+                              Delete
+                            </button>
+                          </article>
+                        ))}
+                        {(card.comments ?? []).length === 0 && <p className={styles.emptyComments}>No updates yet</p>}
+                      </div>
+                      <form
+                        className={styles.commentForm}
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void handleAddComment(column.id, card);
+                        }}
+                      >
+                        <textarea
+                          aria-label={`Add comment to ${card.title}`}
+                          placeholder="Add an update..."
+                          value={commentDraft}
+                          rows={2}
+                          onChange={(event) => setCommentDraft(event.target.value)}
+                          required
+                        />
+                        <button type="submit" disabled={!commentDraft.trim()}>Comment</button>
+                      </form>
+                    </div>
+                  )}
                   {isEditing && <div className={styles.cardEditFields}>
                     <input
                       aria-label={`Assignee for ${card.title}`}

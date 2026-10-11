@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addCardToColumn,
   createInitialBoard,
+  createCardReference,
   deleteCard,
   formatBoardDate,
   formatCreatedDate,
@@ -119,9 +120,11 @@ describe("kanban board logic", () => {
     delete legacyBoard.columns[0].cards[0].createdAt;
 
     expect(parseBoard(JSON.stringify(legacyBoard))?.columns[0].cards[0]).toMatchObject({
+      cardRef: "WKBACKLOG1",
       assignee: "",
       dueDate: "",
       priority: null,
+      comments: [],
     });
   });
 
@@ -174,5 +177,13 @@ describe("kanban board logic", () => {
   it("formats due dates with date and time and migrates legacy date-only values", () => {
     expect(formatDueDate("2026-10-11T16:35")).toMatch(/^11-Oct-26 \d{2}:\d{2}$/);
     expect(formatDueDate("2026-10-11")).toMatch(/^11-Oct-26 \d{2}:\d{2}$/);
+  });
+
+  it("creates unique alphanumeric card references", () => {
+    const first = createCardReference();
+    const second = createCardReference();
+
+    expect(first).toMatch(/^WK[A-Z0-9]{10}$/);
+    expect(second).not.toBe(first);
   });
 });

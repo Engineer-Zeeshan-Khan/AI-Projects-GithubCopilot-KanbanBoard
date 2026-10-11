@@ -1,13 +1,21 @@
 export type ColumnId = "backlog" | "todo" | "in-progress" | "review" | "done";
 
+export type CardComment = {
+  id: string;
+  text: string;
+  createdAt: string;
+};
+
 export type Card = {
   id: string;
+  cardRef?: string;
   title: string;
   details: string;
   assignee?: string;
   dueDate?: string;
   priority?: 1 | 2 | 3 | null;
   createdAt?: string;
+  comments?: CardComment[];
 };
 
 export type BoardColumn = {
@@ -20,6 +28,21 @@ export type Board = {
   columns: BoardColumn[];
 };
 
+function cardReferenceFromId(id: string): string {
+  return `WK${id.replace(/[^a-z0-9]/gi, "").slice(-10).toUpperCase()}`;
+}
+
+export function createCardReference(): string {
+  return `WK${globalThis.crypto.randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
+}
+
+function isCardComment(value: unknown): value is CardComment {
+  return typeof value === "object" && value !== null &&
+    "id" in value && typeof value.id === "string" &&
+    "text" in value && typeof value.text === "string" &&
+    "createdAt" in value && typeof value.createdAt === "string";
+}
+
 function isCard(value: unknown): value is Card {
   return (
     typeof value === "object" &&
@@ -30,10 +53,12 @@ function isCard(value: unknown): value is Card {
     typeof value.id === "string" &&
     typeof value.title === "string" &&
     typeof value.details === "string" &&
+    (!("cardRef" in value) || typeof value.cardRef === "string") &&
     (!("assignee" in value) || typeof value.assignee === "string") &&
     (!("dueDate" in value) || typeof value.dueDate === "string") &&
     (!("priority" in value) || value.priority === null || value.priority === 1 || value.priority === 2 || value.priority === 3) &&
-    (!("createdAt" in value) || typeof value.createdAt === "string")
+    (!("createdAt" in value) || typeof value.createdAt === "string") &&
+    (!("comments" in value) || (Array.isArray(value.comments) && value.comments.every(isCardComment)))
   );
 }
 
@@ -44,10 +69,12 @@ export function parseCard(value: unknown): Card | null {
 
   return {
     ...value,
+    cardRef: value.cardRef ?? cardReferenceFromId(value.id),
     assignee: value.assignee ?? "",
     dueDate: normalizeDueDate(value.dueDate ?? ""),
     priority: value.priority ?? null,
     createdAt: value.createdAt ?? new Date().toISOString(),
+    comments: value.comments ?? [],
   };
 }
 
@@ -210,10 +237,12 @@ export function createInitialBoard(): Board {
       title: column.title,
       cards: demoCardsByColumn[column.id].map((card) => ({
         ...card,
+        cardRef: cardReferenceFromId(card.id),
         assignee: "",
         dueDate: "",
         priority: null,
         createdAt: localDateString(),
+        comments: [],
       })),
     })),
   };
