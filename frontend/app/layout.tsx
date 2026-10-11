@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Product Launch Board",
-  description: "A polished single-board kanban dashboard for planning and workflow tracking.",
+  title: "Weekly Task Kanban",
+  description: "A local kanban board for weekly task planning and tracking.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

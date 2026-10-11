@@ -20,6 +20,12 @@
 # production
 /build
 
+# private local board state
+/data/kanban-board-history.xlsx
+/data/current-board.json
+/data/current-board.json.tmp
+/data/last-auto-snapshot-date.txt
+
 # misc
 .DS_Store
 *.pem

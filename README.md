@@ -8,7 +8,9 @@ npm ci
 npm run dev
 ```
 
-Open http://localhost:3000. Board changes remain in this browser on this device after the site stops. Select **Save snapshot & turn off** to append the board to `frontend/data/kanban-board-history.xlsx` and stop the Next.js server. Each click appends a dated row for every card.
+Open http://localhost:3000. Cards support an assignee, due date, priority, and creation date; overdue open cards return to Backlog. Drag cards to reorder them within a column. Board edits remain in this browser on this device and are mirrored to private local server state.
+
+Use **Save snapshot** to append a dated board to `frontend/data/kanban-board-history.xlsx`. The server also appends an automatic snapshot at 11:59 PM in the Mac's timezone each day while the Mac and app server are running. **Turn off** saves a final snapshot before stopping the server.
 
 The app binds to this Mac only. Board data is stored in browser storage and the local Excel workbook; the snapshot button sends it only to the local app endpoint. Next.js telemetry is disabled in the npm scripts. The build may fetch the configured Geist font from Google, but that request does not include board data.
 
@@ -18,7 +20,7 @@ To turn the site back on, run this one-line command from Terminal:
 cd /Users/zeeshankhan/CODE/kanban/frontend && npm run dev
 ```
 
-The snapshot can only be appended when the site is running and you select the button. If the Mac loses power before that, the current board remains in browser storage, but no new Excel snapshot is created.
+Automatic snapshots require the Mac and app server to remain on. If the Mac is off at the end of the day, no automatic snapshot can run during that downtime.
 
 ## Instructions
 

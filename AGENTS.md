@@ -5,8 +5,9 @@
 - An MVP of a Kanban style Project Management application as a web app  
 - The web app should only have 1 board
 - The board has fixed 5 columns that can be renamed  
-- Each card has a title and details only
+- Cards have a title and details, with optional assignee, due date, and priority (1-3); created date is recorded
 - Drag and drop interface to move cards between columns
+- Drag and drop to reorder cards within a column
 - Add a new card to a column; delete an existing card
 - No more functionality: no archive, no search/filter. Keep it simple.
 - The priority is a slick, professional, gorgeous UI/UX with very simple features
@@ -17,6 +18,7 @@
 - Implemented as a modern NextJS app, client rendered
 - The NextJS app should be created in a subdirectory `frontend`
 - Persist board changes in the browser so the same user can return to them later
+- Keep a local server copy and append daily Excel snapshots while the app server is running
 - The app should open with dummy data populated for the single board on first use
 - Browser-local persistence only; no backend or cross-device synchronization for the MVP
 - No user management for the MVP

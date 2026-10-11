@@ -4,6 +4,10 @@ export type Card = {
   id: string;
   title: string;
   details: string;
+  assignee?: string;
+  dueDate?: string;
+  priority?: 1 | 2 | 3 | null;
+  createdAt?: string;
 };
 
 export type BoardColumn = {
@@ -15,6 +19,41 @@ export type BoardColumn = {
 export type Board = {
   columns: BoardColumn[];
 };
+
+function isCard(value: unknown): value is Card {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "id" in value &&
+    "title" in value &&
+    "details" in value &&
+    typeof value.id === "string" &&
+    typeof value.title === "string" &&
+    typeof value.details === "string" &&
+    (!("assignee" in value) || typeof value.assignee === "string") &&
+    (!("dueDate" in value) || typeof value.dueDate === "string") &&
+    (!("priority" in value) || value.priority === null || value.priority === 1 || value.priority === 2 || value.priority === 3) &&
+    (!("createdAt" in value) || typeof value.createdAt === "string")
+  );
+}
+
+export function parseCard(value: unknown): Card | null {
+  if (!isCard(value)) {
+    return null;
+  }
+
+  return {
+    ...value,
+    assignee: value.assignee ?? "",
+    dueDate: normalizeDueDate(value.dueDate ?? ""),
+    priority: value.priority ?? null,
+    createdAt: value.createdAt ?? new Date().toISOString(),
+  };
+}
+
+export function normalizeDueDate(value: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00` : value;
+}
 
 function isBoard(value: unknown): value is Board {
   if (
@@ -42,17 +81,7 @@ function isBoard(value: unknown): value is Board {
     return (
       column.id === columnOrder[index].id &&
       typeof column.title === "string" &&
-      column.cards.every(
-        (card: unknown) =>
-          typeof card === "object" &&
-          card !== null &&
-          "id" in card &&
-          "title" in card &&
-          "details" in card &&
-          typeof card.id === "string" &&
-          typeof card.title === "string" &&
-          typeof card.details === "string",
-      )
+      column.cards.every(isCard)
     );
   });
 }
@@ -64,10 +93,83 @@ export function parseBoard(serialized: string | null): Board | null {
 
   try {
     const board: unknown = JSON.parse(serialized);
-    return isBoard(board) ? board : null;
+    if (!isBoard(board)) {
+      return null;
+    }
+
+    return {
+      columns: board.columns.map((column) => ({
+        ...column,
+        cards: sortCardsByPriority(column.cards.map((card) => parseCard(card)!)),
+      })),
+    };
   } catch {
     return null;
   }
+}
+
+export function localDateString(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function nextLocalDayEnd(now = new Date()): Date {
+  const endOfDay = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    23,
+    59,
+    59,
+    999,
+  );
+  if (endOfDay <= now) {
+    endOfDay.setDate(endOfDay.getDate() + 1);
+  }
+  return endOfDay;
+}
+
+export function formatBoardDate(value: string): string {
+  if (!value) {
+    return "";
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "2-digit",
+  }).formatToParts(new Date(year, month - 1, day));
+  const dateParts = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${dateParts.day}-${dateParts.month}-${dateParts.year}`;
+}
+
+export function formatCreatedDate(value: string): string {
+  if (!value) {
+    return "";
+  }
+
+  const timestamp = value.length === 10
+    ? new Date(`${value}T00:00:00`)
+    : new Date(value);
+  const date = formatBoardDate(localDateString(timestamp));
+  const time = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(timestamp);
+  return `${date} ${time}`;
+}
+
+export function formatDueDate(value: string): string {
+  return value ? formatCreatedDate(normalizeDueDate(value)) : "";
+}
+
+export function sortCardsByPriority(cards: Card[]): Card[] {
+  const priorityOrder = (priority: Card["priority"]) => priority ?? 4;
+  return [...cards].sort((left, right) => priorityOrder(left.priority) - priorityOrder(right.priority));
 }
 
 const columnOrder: Array<{ id: ColumnId; title: string }> = [
@@ -106,7 +208,13 @@ export function createInitialBoard(): Board {
     columns: columnOrder.map((column) => ({
       id: column.id,
       title: column.title,
-      cards: demoCardsByColumn[column.id].map((card) => ({ ...card })),
+      cards: demoCardsByColumn[column.id].map((card) => ({
+        ...card,
+        assignee: "",
+        dueDate: "",
+        priority: null,
+        createdAt: localDateString(),
+      })),
     })),
   };
 }
@@ -128,7 +236,9 @@ export function addCardToColumn(board: Board, columnId: ColumnId, card: Card): B
   return {
     ...board,
     columns: board.columns.map((column) =>
-      column.id === columnId ? { ...column, cards: [...column.cards, card] } : column,
+      column.id === columnId
+        ? { ...column, cards: sortCardsByPriority([...column.cards, card]) }
+        : column,
     ),
   };
 }
@@ -144,16 +254,34 @@ export function deleteCard(board: Board, columnId: ColumnId, cardId: string): Bo
   };
 }
 
+export function updateCard(
+  board: Board,
+  columnId: ColumnId,
+  cardId: string,
+  changes: Partial<Omit<Card, "id">>,
+): Board {
+  return {
+    ...board,
+    columns: board.columns.map((column) =>
+      column.id === columnId
+        ? {
+            ...column,
+            cards: sortCardsByPriority(column.cards.map((card) =>
+              card.id === cardId ? { ...card, ...changes } : card,
+            )),
+          }
+        : column,
+    ),
+  };
+}
+
 export function moveCardBetweenColumns(
   board: Board,
   fromColumnId: ColumnId,
   toColumnId: ColumnId,
   cardId: string,
+  targetIndex?: number,
 ): Board {
-  if (fromColumnId === toColumnId) {
-    return board;
-  }
-
   const sourceColumn = board.columns.find((column) => column.id === fromColumnId);
   const targetColumn = board.columns.find((column) => column.id === toColumnId);
 
@@ -167,24 +295,62 @@ export function moveCardBetweenColumns(
     return board;
   }
 
+  const sourceCards = sortCardsByPriority(sourceColumn.cards.filter((card) => card.id !== cardId));
+  const destinationCards = fromColumnId === toColumnId
+    ? sourceCards
+    : sortCardsByPriority(targetColumn.cards);
+  const insertionIndex = Math.max(0, Math.min(targetIndex ?? destinationCards.length, destinationCards.length));
+  destinationCards.splice(insertionIndex, 0, movingCard);
+  const orderedDestinationCards = sortCardsByPriority(destinationCards);
+
   return {
     ...board,
     columns: board.columns.map((column) => {
       if (column.id === fromColumnId) {
-        return {
-          ...column,
-          cards: column.cards.filter((card) => card.id !== cardId),
-        };
+        return fromColumnId === toColumnId
+          ? { ...column, cards: orderedDestinationCards }
+          : { ...column, cards: sourceCards };
       }
 
       if (column.id === toColumnId) {
-        return {
-          ...column,
-          cards: [...column.cards, movingCard],
-        };
+        return { ...column, cards: orderedDestinationCards };
       }
 
       return column;
     }),
+  };
+}
+
+export function moveOverdueCards(board: Board, today = localDateString()): Board {
+  let changed = false;
+  const columns = board.columns.map((column) => {
+    if (column.id === "backlog" || column.id === "done") {
+      return column;
+    }
+
+    const overdue = column.cards.filter((card) => card.dueDate && card.dueDate < today);
+    if (overdue.length === 0) {
+      return column;
+    }
+
+    changed = true;
+    return { ...column, cards: column.cards.filter((card) => !overdue.includes(card)) };
+  });
+
+  if (!changed) {
+    return board;
+  }
+
+  const overdueCards = board.columns
+    .filter((column) => column.id !== "backlog" && column.id !== "done")
+    .flatMap((column) => column.cards.filter((card) => card.dueDate && card.dueDate < today));
+
+  return {
+    ...board,
+    columns: columns.map((column) =>
+      column.id === "backlog"
+        ? { ...column, cards: sortCardsByPriority([...overdueCards, ...column.cards]) }
+        : column,
+    ),
   };
 }
