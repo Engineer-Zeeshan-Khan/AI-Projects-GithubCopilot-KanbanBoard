@@ -149,6 +149,15 @@ function subscribeToClock(subscriber: () => void) {
   };
 }
 
+function subscribeToTimeZone(subscriber: () => void) {
+  const timer = window.setTimeout(subscriber, 0);
+  return () => window.clearTimeout(timer);
+}
+
+function getTimeZoneSnapshot() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
 function syncBoard(board: Board) {
   void fetch("/api/board/sync", {
     method: "POST",
@@ -252,6 +261,7 @@ export default function Home() {
   );
   const [draft, setDraft] = useState<CardDraft>({ ...emptyDraft });
   const clock = useSyncExternalStore(subscribeToClock, getClockSnapshot, () => null);
+  const timeZone = useSyncExternalStore(subscribeToTimeZone, getTimeZoneSnapshot, () => null);
   const [draggedCard, setDraggedCard] = useState<{ cardId: string; fromColumnId: ColumnId } | null>(null);
   const [isTurningOff, setIsTurningOff] = useState(false);
   const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
@@ -886,7 +896,7 @@ export default function Home() {
                     )}
                     <span className={styles.createdDate}>
                       <span className={styles.createdLabel}>Created</span>
-                      {formatCreatedDate(card.createdAt ?? localDateString())}
+                      {timeZone ? formatCreatedDate(card.createdAt ?? localDateString(), timeZone) : "--"}
                     </span>
                     {card.dueDate && <span className={styles.dueDate}>Due on {formatDueDate(card.dueDate)}</span>}
                   </div>
@@ -902,7 +912,7 @@ export default function Home() {
                         {(card.comments ?? []).map((comment) => (
                           <article key={comment.id} className={styles.commentEntry}>
                             <p>{comment.text}</p>
-                            <time>{formatCreatedDate(comment.createdAt)}</time>
+                            <time>{timeZone ? formatCreatedDate(comment.createdAt, timeZone) : "--"}</time>
                             <button
                               type="button"
                               aria-label={`Delete comment ${comment.id}`}

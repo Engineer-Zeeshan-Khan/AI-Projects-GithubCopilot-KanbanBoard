@@ -163,31 +163,51 @@ export function formatBoardDate(value: string): string {
     return "";
   }
 
-  const [year, month, day] = value.split("-").map(Number);
-  const parts = new Intl.DateTimeFormat("en-GB", {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return "";
+  const [, year, month, day] = match;
+  const formatted = new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
     year: "2-digit",
-  }).formatToParts(new Date(year, month - 1, day));
-  const dateParts = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    timeZone: "UTC",
+  }).formatToParts(new Date(`${year}-${month}-${day}T00:00:00.000Z`));
+  const dateParts = Object.fromEntries(formatted.map((part) => [part.type, part.value]));
   return `${dateParts.day}-${dateParts.month}-${dateParts.year}`;
 }
 
-export function formatCreatedDate(value: string): string {
+function formatDateAndTime(date: string, hour: string, minute: string): string {
+  if (!formatBoardDate(date) || !/^\d{2}$/.test(hour) || !/^\d{2}$/.test(minute)) return "";
+  return `${formatBoardDate(date)} ${hour}:${minute}`;
+}
+
+export function formatCreatedDate(value: string, timeZone?: string): string {
   if (!value) {
     return "";
   }
 
-  const timestamp = value.length === 10
-    ? new Date(`${value}T00:00:00`)
-    : new Date(value);
-  const date = formatBoardDate(localDateString(timestamp));
+  const dateOnly = /^(\d{4}-\d{2}-\d{2})$/.exec(value);
+  if (dateOnly) return formatDateAndTime(dateOnly[1], "00", "00");
+
+  const localDateTime = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (localDateTime) return formatDateAndTime(localDateTime[1], localDateTime[2], localDateTime[3]);
+
+  const timestamp = new Date(value);
+  if (!Number.isFinite(timestamp.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "2-digit",
+    timeZone: timeZone ?? "UTC",
+  }).formatToParts(timestamp);
+  const dateParts = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   const time = new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    timeZone: timeZone ?? "UTC",
   }).format(timestamp);
-  return `${date} ${time}`;
+  return `${dateParts.day}-${dateParts.month}-${dateParts.year} ${time}`;
 }
 
 export function formatDueDate(value: string): string {
@@ -350,14 +370,18 @@ export function moveCardBetweenColumns(
   };
 }
 
-export function moveOverdueCards(board: Board, today = localDateString()): Board {
+export function moveOverdueCards(board: Board, nowOrDate: Date | string = new Date()): Board {
+  const now = nowOrDate instanceof Date
+    ? `${localDateString(nowOrDate)}T${String(nowOrDate.getHours()).padStart(2, "0")}:${String(nowOrDate.getMinutes()).padStart(2, "0")}:${String(nowOrDate.getSeconds()).padStart(2, "0")}`
+    : `${nowOrDate}T23:59:59`;
+  const isOverdue = (dueDate: string) => `${normalizeDueDate(dueDate).slice(0, 16)}:00` < now;
   let changed = false;
   const columns = board.columns.map((column) => {
     if (column.id === "backlog" || column.id === "done") {
       return column;
     }
 
-    const overdue = column.cards.filter((card) => card.dueDate && card.dueDate < today);
+    const overdue = column.cards.filter((card) => card.dueDate && isOverdue(card.dueDate));
     if (overdue.length === 0) {
       return column;
     }
@@ -372,7 +396,7 @@ export function moveOverdueCards(board: Board, today = localDateString()): Board
 
   const overdueCards = board.columns
     .filter((column) => column.id !== "backlog" && column.id !== "done")
-    .flatMap((column) => column.cards.filter((card) => card.dueDate && card.dueDate < today));
+    .flatMap((column) => column.cards.filter((card) => card.dueDate && isOverdue(card.dueDate)));
 
   return {
     ...board,

@@ -190,7 +190,7 @@ export async function appendAutomaticSnapshotIfNeeded(timestamp = new Date()) {
     const overdueCards = previousBoard.columns
       .filter((column) => column.id !== "backlog" && column.id !== "done")
       .flatMap((column) => column.cards
-        .filter((card) => backlogIds.has(card.id) && card.dueDate && card.dueDate.slice(0, 10) < today)
+        .filter((card) => backlogIds.has(card.id))
         .map((card) => ({ card, column })));
     await Promise.all(overdueCards.map(({ card, column }) => appendCardChangeEvent({
       action: "Moved",

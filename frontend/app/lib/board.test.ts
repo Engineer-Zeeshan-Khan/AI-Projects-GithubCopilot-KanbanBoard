@@ -111,6 +111,26 @@ describe("kanban board logic", () => {
     expect(updated.columns[4].cards.map((card) => card.id)).toContain("done-1");
   });
 
+  it("moves cards to backlog only after their exact local due time", () => {
+    const board = createInitialBoard();
+    board.columns[1].cards[0].dueDate = "2026-10-11T14:00";
+    board.columns[1].cards[1].dueDate = "2026-10-11T14:30";
+
+    const updated = moveOverdueCards(board, new Date(2026, 9, 11, 14, 15));
+
+    expect(updated.columns[0].cards.map((card) => card.id)).toContain("todo-1");
+    expect(updated.columns[1].cards.map((card) => card.id)).toContain("todo-2");
+  });
+
+  it("marks a deadline overdue immediately after its minute ends", () => {
+    const board = createInitialBoard();
+    board.columns[1].cards[0].dueDate = "2026-10-11T23:59";
+
+    const updated = moveOverdueCards(board, new Date(2026, 9, 11, 23, 59, 1));
+
+    expect(updated.columns[0].cards.map((card) => card.id)).toContain("todo-1");
+  });
+
   it("migrates cards saved before metadata was added", () => {
     const board = createInitialBoard();
     const legacyBoard = JSON.parse(JSON.stringify(board)) as typeof board;
@@ -172,6 +192,11 @@ describe("kanban board logic", () => {
 
   it("formats a creation timestamp with date and 24-hour time", () => {
     expect(formatCreatedDate("2026-10-11T16:35:00.000Z")).toMatch(/^\d{2}-[A-Z][a-z]{2}-\d{2} \d{2}:\d{2}$/);
+  });
+
+  it("formats ISO timestamps consistently for an explicit timezone", () => {
+    expect(formatCreatedDate("2026-10-11T01:00:00.000Z", "America/Los_Angeles")).toBe("10-Oct-26 18:00");
+    expect(formatCreatedDate("not a date", "UTC")).toBe("");
   });
 
   it("formats due dates with date and time and migrates legacy date-only values", () => {
