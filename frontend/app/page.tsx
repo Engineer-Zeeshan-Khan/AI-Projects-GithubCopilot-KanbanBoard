@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Check, MessageSquare, Pencil, X } from "lucide-react";
 import styles from "./page.module.css";
 import {
   addCardToColumn,
@@ -37,6 +38,35 @@ const emptyDraft: CardDraft = {
   dueDate: "",
   priority: null,
 };
+
+function renderLinkedText(text: string) {
+  const parts: React.ReactNode[] = [];
+  const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(urlPattern)) {
+    const matchedUrl = match[0];
+    const url = matchedUrl.replace(/[.,!?;:)\]}]+$/, "");
+    const trailingText = matchedUrl.slice(url.length);
+    const startIndex = match.index ?? 0;
+    parts.push(text.slice(lastIndex, startIndex));
+    parts.push(
+      <a
+        key={`link-${startIndex}`}
+        href={/^https?:\/\//i.test(url) ? url : `https://${url}`}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        {url}
+      </a>,
+    );
+    parts.push(trailingText);
+    lastIndex = startIndex + matchedUrl.length;
+  }
+
+  parts.push(text.slice(lastIndex));
+  return parts;
+}
 
 type CardChangeAction = "Created" | "Deleted" | "Moved" | "Reordered" | "Comment added" | "Comment deleted";
 type CardChangePayload = {
@@ -85,8 +115,13 @@ async function recordOverdueCardMoves(before: Board, after: Board) {
 
 const boardStorageKey = "kanban-board";
 const teamProfileStorageKey = "kanban-team-profile";
-type TeamProfile = { name: string; logo: string };
-const defaultTeamProfile: TeamProfile = { name: "Weekly Team", logo: "" };
+type TeamProfile = { name: string; logo: string; boardName: string; logoOnly: boolean };
+const defaultTeamProfile: TeamProfile = {
+  name: "Weekly Team",
+  logo: "",
+  boardName: "Weekly Task Kanban",
+  logoOnly: false,
+};
 let cachedTeamProfile = defaultTeamProfile;
 let cachedTeamProfileValue: string | null | undefined;
 const teamProfileSubscribers = new Set<() => void>();
@@ -180,6 +215,10 @@ function getTeamProfileSnapshot(): TeamProfile {
       cachedTeamProfile = {
         name: typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : defaultTeamProfile.name,
         logo: typeof parsed.logo === "string" ? parsed.logo : "",
+        boardName: typeof parsed.boardName === "string" && parsed.boardName.trim()
+          ? parsed.boardName.trim()
+          : defaultTeamProfile.boardName,
+        logoOnly: typeof parsed.logoOnly === "boolean" ? parsed.logoOnly : false,
       };
     } catch {
       cachedTeamProfile = defaultTeamProfile;
@@ -274,6 +313,12 @@ export default function Home() {
     columnId: ColumnId;
     draft: Card;
   } | null>(null);
+  const [expandedCard, setExpandedCard] = useState<{
+    cardId: string;
+    left: number;
+    top: number;
+    width: number;
+  } | null>(null);
   const [savingCardId, setSavingCardId] = useState<string | null>(null);
   const [openCommentCardId, setOpenCommentCardId] = useState<string | null>(null);
   const [commentDraft, setCommentDraft] = useState("");
@@ -282,9 +327,12 @@ export default function Home() {
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [teamNameDraft, setTeamNameDraft] = useState("Weekly Team");
   const [teamLogoDraft, setTeamLogoDraft] = useState("");
+  const [teamLogoOnlyDraft, setTeamLogoOnlyDraft] = useState(false);
+  const [boardNameDraft, setBoardNameDraft] = useState("Weekly Task Kanban");
   const [customizeError, setCustomizeError] = useState("");
   const teamName = teamProfile.name;
   const teamLogo = teamProfile.logo;
+  const boardName = teamProfile.boardName;
 
   useEffect(() => {
     const currentBoard = getBoardSnapshot();
@@ -412,7 +460,12 @@ export default function Home() {
   };
 
   const handleSaveTeamProfile = () => {
-    const profile = { name: teamNameDraft.trim() || "Weekly Team", logo: teamLogoDraft };
+    const profile = {
+      name: teamNameDraft.trim() || "Weekly Team",
+      logo: teamLogoDraft,
+      boardName: boardNameDraft.trim() || "Weekly Task Kanban",
+      logoOnly: teamLogoOnlyDraft && Boolean(teamLogoDraft),
+    };
     try {
       saveTeamProfile(profile);
       setCustomizeError("");
@@ -635,12 +688,15 @@ export default function Home() {
           ) : (
             <span className={styles.brandMark}>{teamName.slice(0, 1).toUpperCase()}</span>
           )}
+          {teamLogo && teamProfile.logoOnly ? null : (
           <button
             type="button"
             className={styles.teamName}
             onDoubleClick={() => {
               setTeamNameDraft(teamName);
               setTeamLogoDraft(teamLogo);
+              setTeamLogoOnlyDraft(teamProfile.logoOnly);
+              setBoardNameDraft(boardName);
               setCustomizeOpen(true);
             }}
             aria-label={`${teamName}. Double-click to customize`}
@@ -648,6 +704,7 @@ export default function Home() {
           >
             {teamName}
           </button>
+          )}
         </div>
         <nav className={styles.sidebarNav} aria-label="Board actions">
           <a className={`${styles.navItem} ${styles.navItemActive}`} href="#board">
@@ -678,6 +735,8 @@ export default function Home() {
             onClick={() => {
               setTeamNameDraft(teamName);
               setTeamLogoDraft(teamLogo);
+              setTeamLogoOnlyDraft(teamProfile.logoOnly);
+              setBoardNameDraft(boardName);
               setCustomizeOpen((open) => !open);
               setCustomizeError("");
             }}
@@ -697,7 +756,7 @@ export default function Home() {
             <span className={styles.destinationLabel}>Adding to To Do</span>
             <input autoFocus value={draft.title} onChange={(event) => updateDraft("title", event.target.value)} placeholder="Card title" aria-label="New card title" required />
             <textarea value={draft.details} onChange={(event) => updateDraft("details", event.target.value)} placeholder="Details" aria-label="New card details" rows={3} />
-            <input value={draft.assignee} onChange={(event) => updateDraft("assignee", event.target.value)} placeholder="Owner (optional)" aria-label="New card owner" />
+            <input value={draft.assignee} onChange={(event) => updateDraft("assignee", event.target.value)} placeholder="Owners, comma separated (optional)" aria-label="New card owners, comma separated" />
             <label className={styles.dateTimeField}>
               <span>Due on</span>
               <input type="datetime-local" value={draft.dueDate} onChange={(event) => updateDraft("dueDate", event.target.value)} aria-label="New card due on" />
@@ -716,13 +775,24 @@ export default function Home() {
         {customizeOpen && (
           <section className={styles.customizePanel} aria-label="Customize board">
             <h2>Customize</h2>
-            <label htmlFor="team-name">Team or company</label>
+            <label htmlFor="team-name">Team label</label>
             <input id="team-name" value={teamNameDraft} onChange={(event) => setTeamNameDraft(event.target.value)} maxLength={40} />
+            <label htmlFor="board-name">Board name</label>
+            <input id="board-name" value={boardNameDraft} onChange={(event) => setBoardNameDraft(event.target.value)} maxLength={60} />
             <label className={styles.uploadLogoButton}>
               Choose logo
               <input type="file" accept="image/*" onChange={(event) => handleTeamLogo(event.target.files?.[0])} />
             </label>
             {teamLogoDraft && <button type="button" className={styles.removeLogoButton} onClick={() => setTeamLogoDraft("")}>Remove logo</button>}
+            <label className={styles.logoOnlyOption}>
+              <input
+                type="checkbox"
+                checked={teamLogoOnlyDraft}
+                disabled={!teamLogoDraft}
+                onChange={(event) => setTeamLogoOnlyDraft(event.target.checked)}
+              />
+              Show logo instead of label
+            </label>
             {customizeError && <p role="alert" className={styles.customizeError}>{customizeError}</p>}
             <button type="button" className={styles.createCardButton} onClick={handleSaveTeamProfile}>Save</button>
           </section>
@@ -737,9 +807,11 @@ export default function Home() {
         <header className={styles.header}>
           <div className={styles.headingBlock}>
             <p className={styles.eyebrow}>Project board</p>
-            <h1>Weekly Task Kanban</h1>
+            <h1>{boardName}</h1>
             <time className={styles.dateStamp} dateTime={clock ? localDateString(clock) : undefined}>
-              {clock ? formatBoardDate(localDateString(clock)) : "-- --- --"}
+              {clock
+                ? `${clock.toLocaleDateString(undefined, { weekday: "long" })}, ${formatBoardDate(localDateString(clock))}`
+                : "---, -- --- --"}
             </time>
           </div>
           <div className={styles.clockBlock}>
@@ -751,6 +823,10 @@ export default function Home() {
               {Array.from({ length: 12 }, (_, mark) => (
                 <span key={mark} className={styles.watchTick} style={{ transform: `rotate(${mark * 30}deg)` }} />
               ))}
+              <span className={`${styles.clockNumeral} ${styles.clockNumeralTop}`}>12</span>
+              <span className={`${styles.clockNumeral} ${styles.clockNumeralRight}`}>3</span>
+              <span className={`${styles.clockNumeral} ${styles.clockNumeralBottom}`}>6</span>
+              <span className={`${styles.clockNumeral} ${styles.clockNumeralLeft}`}>9</span>
               <span className={styles.hourHand} style={{ transform: `rotate(${clock ? (clock.getHours() % 12) * 30 + clock.getMinutes() / 2 : 0}deg)` }} />
               <span className={styles.minuteHand} style={{ transform: `rotate(${clock ? clock.getMinutes() * 6 : 0}deg)` }} />
               <span className={styles.secondHand} style={{ transform: `rotate(${clock ? clock.getSeconds() * 6 : 0}deg)` }} />
@@ -791,6 +867,8 @@ export default function Home() {
             <div className={styles.cardList}>
               {column.cards.map((card, cardIndex) => {
                 const isEditing = editingCard?.cardId === card.id;
+                const owners = (card.assignee ?? "").split(",").map((owner) => owner.trim()).filter(Boolean);
+                const isExpanded = expandedCard?.cardId === card.id;
                 const priorityClass = column.id === "done"
                   ? ""
                   : card.priority === 1
@@ -801,8 +879,28 @@ export default function Home() {
                 return (
                 <article
                   key={card.id}
-                  className={`${styles.card} ${priorityClass}`}
+                  className={`${styles.card} ${priorityClass} ${isExpanded ? styles.cardExpanded : ""}`}
+                  style={isExpanded ? {
+                    left: expandedCard.left,
+                    top: expandedCard.top,
+                    width: expandedCard.width,
+                  } : undefined}
                   draggable={!isEditing && openCommentCardId !== card.id}
+                  onClick={(event) => {
+                    if (event.target instanceof Element && event.target.closest("button, a, input, textarea, select")) return;
+                    if (isExpanded) {
+                      setExpandedCard(null);
+                      return;
+                    }
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    const width = Math.min(bounds.width * 1.9, window.innerWidth - 32);
+                    setExpandedCard({
+                      cardId: card.id,
+                      width,
+                      left: Math.max(16, Math.min(bounds.left, window.innerWidth - width - 16)),
+                      top: Math.max(16, Math.min(bounds.top, window.innerHeight * 0.3)),
+                    });
+                  }}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => {
                     event.preventDefault();
@@ -827,54 +925,65 @@ export default function Home() {
                       ) : (
                         <h3>{card.title}</h3>
                       )}
-                      <span className={styles.cardReference}>{card.cardRef}</span>
                     </div>
-                    <div className={styles.cardActions}>
-                      <button
-                        type="button"
-                        className={styles.editButton}
-                        aria-label={`${isEditing ? "Cancel editing" : "Edit"} ${card.title}`}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={() => isEditing ? setEditingCard(null) : handleEditCard(column.id, card)}
-                        disabled={savingCardId === card.id}
-                      >
-                        {isEditing ? "Cancel" : "Edit"}
-                      </button>
-                      {isEditing && (
+                    <div className={styles.cardSubRow}>
+                      <span className={styles.cardReference}>{card.cardRef}</span>
+                      <div className={styles.cardActions}>
                         <button
                           type="button"
-                          className={styles.saveCardButton}
+                          className={styles.editButton}
+                          aria-label={`${isEditing ? "Cancel editing" : "Edit"} ${card.title}`}
+                          title={isEditing ? "Cancel editing" : "Edit card"}
                           onPointerDown={(event) => event.stopPropagation()}
-                          onClick={() => void handleSaveCardEdit(column.title)}
+                          onClick={() => isEditing ? setEditingCard(null) : handleEditCard(column.id, card)}
                           disabled={savingCardId === card.id}
                         >
-                          {savingCardId === card.id ? "Saving..." : "Save"}
+                          {isEditing ? <X size={15} aria-hidden="true" /> : <Pencil size={14} aria-hidden="true" />}
                         </button>
-                      )}
+                        {isEditing && (
+                          <button
+                            type="button"
+                            className={styles.saveCardButton}
+                            aria-label={`Save ${card.title}`}
+                            title="Save changes"
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={() => void handleSaveCardEdit(column.title)}
+                            disabled={savingCardId === card.id}
+                          >
+                            <Check size={15} aria-hidden="true" />
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className={styles.commentsButton}
+                        aria-expanded={openCommentCardId === card.id}
+                        aria-label={`Updates for ${card.title}, ${(card.comments ?? []).length} comments`}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={() => {
+                          setOpenCommentCardId(openCommentCardId === card.id ? null : card.id);
+                          setCommentDraft("");
+                        }}
+                      >
+                        <MessageSquare size={15} aria-hidden="true" />
+                        {Boolean((card.comments ?? []).length) && <span className={styles.updateCount}>{(card.comments ?? []).length}</span>}
+                      </button>
                       <button
                         type="button"
                         className={styles.deleteButton}
                         aria-label={`Delete ${card.title}`}
+                        title="Delete card"
                         onPointerDown={(event) => event.stopPropagation()}
-                        onClick={() => void handleDelete(column.id, card.id)}
+                        onClick={() => {
+                          if (window.confirm("Are you sure you want to delete this card?")) {
+                            void handleDelete(column.id, card.id);
+                          }
+                        }}
                         disabled={savingCardId === card.id}
                       >
                         ×
                       </button>
                     </div>
-                    <button
-                      type="button"
-                      className={styles.commentsButton}
-                      aria-expanded={openCommentCardId === card.id}
-                      aria-label={`Updates for ${card.title}, ${(card.comments ?? []).length} comments`}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={() => {
-                        setOpenCommentCardId(openCommentCardId === card.id ? null : card.id);
-                        setCommentDraft("");
-                      }}
-                    >
-                      <span aria-hidden="true">◷</span> Updates{(card.comments ?? []).length > 0 ? ` · ${(card.comments ?? []).length}` : ""}
-                    </button>
                   </div>
                   {isEditing ? (
                     <textarea
@@ -885,10 +994,17 @@ export default function Home() {
                       onChange={(event) => setEditingCard({ ...editingCard, draft: { ...editingCard.draft, details: event.target.value } })}
                     />
                   ) : (
-                    <p>{card.details}</p>
+                    <p>{renderLinkedText(card.details)}</p>
                   )}
+                  <div className={styles.cardOwnerRow}>
+                    <span className={styles.ownerLabel}>Owners</span>
+                    <div className={styles.ownerList}>
+                      {owners.length > 0
+                        ? owners.map((owner) => <span key={owner} className={styles.assignee}>{owner}</span>)
+                        : <span className={styles.assignee}>Unassigned</span>}
+                    </div>
+                  </div>
                   <div className={styles.cardMeta}>
-                    {card.assignee && <span className={styles.assignee}>Owner: {card.assignee}</span>}
                     {card.priority && (
                       <span className={`${styles.priority} ${styles[`priority${card.priority}`]}`}>
                         P{card.priority}
@@ -911,7 +1027,7 @@ export default function Home() {
                       <div className={styles.commentsList}>
                         {(card.comments ?? []).map((comment) => (
                           <article key={comment.id} className={styles.commentEntry}>
-                            <p>{comment.text}</p>
+                            <p>{renderLinkedText(comment.text)}</p>
                             <time>{timeZone ? formatCreatedDate(comment.createdAt, timeZone) : "--"}</time>
                             <button
                               type="button"
@@ -945,27 +1061,33 @@ export default function Home() {
                   )}
                   {isEditing && <div className={styles.cardEditFields}>
                     <input
-                      aria-label={`Assignee for ${card.title}`}
-                      placeholder="Assigned to"
+                      aria-label={`Owners for ${card.title}, comma separated`}
+                      placeholder="Owners, comma separated"
                       value={editingCard.draft.assignee ?? ""}
                       onChange={(event) => setEditingCard({ ...editingCard, draft: { ...editingCard.draft, assignee: event.target.value } })}
                     />
-                    <input
-                      aria-label={`Due on for ${card.title}`}
-                      type="datetime-local"
-                      value={editingCard.draft.dueDate ?? ""}
-                      onChange={(event) => setEditingCard({ ...editingCard, draft: { ...editingCard.draft, dueDate: event.target.value } })}
-                    />
-                    <select
-                      aria-label={`Priority for ${card.title}`}
-                      value={editingCard.draft.priority ?? ""}
-                      onChange={(event) => setEditingCard({ ...editingCard, draft: { ...editingCard.draft, priority: event.target.value === "" ? null : Number(event.target.value) as Card["priority"] } })}
-                    >
-                      <option value="">No priority</option>
-                      <option value={1}>Priority 1</option>
-                      <option value={2}>Priority 2</option>
-                      <option value={3}>Priority 3</option>
-                    </select>
+                    <label>
+                      Due date
+                      <input
+                        aria-label={`Due on for ${card.title}`}
+                        type="datetime-local"
+                        value={editingCard.draft.dueDate ?? ""}
+                        onChange={(event) => setEditingCard({ ...editingCard, draft: { ...editingCard.draft, dueDate: event.target.value } })}
+                      />
+                    </label>
+                    <label>
+                      Priority
+                      <select
+                        aria-label={`Priority for ${card.title}`}
+                        value={editingCard.draft.priority ?? ""}
+                        onChange={(event) => setEditingCard({ ...editingCard, draft: { ...editingCard.draft, priority: event.target.value === "" ? null : Number(event.target.value) as Card["priority"] } })}
+                      >
+                        <option value="">No priority</option>
+                        <option value={1}>Priority 1</option>
+                        <option value={2}>Priority 2</option>
+                        <option value={3}>Priority 3</option>
+                      </select>
+                    </label>
                   </div>}
                 </article>
                 );
