@@ -88,12 +88,14 @@ function isBoard(value: unknown): value is Board {
     value === null ||
     !("columns" in value) ||
     !Array.isArray(value.columns) ||
-    value.columns.length !== columnOrder.length
+    value.columns.length === 0 ||
+    value.columns.length > columnOrder.length
   ) {
     return false;
   }
 
-  return value.columns.every((column, index) => {
+  let previousOrder = -1;
+  return value.columns.every((column) => {
     if (
       typeof column !== "object" ||
       column === null ||
@@ -105,8 +107,13 @@ function isBoard(value: unknown): value is Board {
       return false;
     }
 
+    const currentOrder = columnOrder.findIndex((item) => item.id === column.id);
+    if (currentOrder <= previousOrder) {
+      return false;
+    }
+    previousOrder = currentOrder;
+
     return (
-      column.id === columnOrder[index].id &&
       typeof column.title === "string" &&
       column.cards.every(isCard)
     );
@@ -268,6 +275,12 @@ export function createInitialBoard(): Board {
   };
 }
 
+export function createEmptyBoard(): Board {
+  return {
+    columns: columnOrder.map((column) => ({ ...column, cards: [] })),
+  };
+}
+
 export function renameColumn(board: Board, columnId: ColumnId, newTitle: string): Board {
   if (!newTitle.trim()) {
     return board;
@@ -278,6 +291,25 @@ export function renameColumn(board: Board, columnId: ColumnId, newTitle: string)
     columns: board.columns.map((column) =>
       column.id === columnId ? { ...column, title: newTitle.trim() } : column,
     ),
+  };
+}
+
+export function deleteColumn(board: Board, columnId: ColumnId): Board {
+  if (board.columns.length <= 1 || !board.columns.some((column) => column.id === columnId)) {
+    return board;
+  }
+
+  const removedColumn = board.columns.find((column) => column.id === columnId)!;
+  const fallbackColumn = board.columns.find((column) => column.id === "backlog" && column.id !== columnId)
+    ?? board.columns.find((column) => column.id !== columnId)!;
+
+  return {
+    ...board,
+    columns: board.columns
+      .filter((column) => column.id !== columnId)
+      .map((column) => column.id === fallbackColumn.id
+        ? { ...column, cards: sortCardsByPriority([...column.cards, ...removedColumn.cards]) }
+        : column),
   };
 }
 
@@ -375,9 +407,13 @@ export function moveOverdueCards(board: Board, nowOrDate: Date | string = new Da
     ? `${localDateString(nowOrDate)}T${String(nowOrDate.getHours()).padStart(2, "0")}:${String(nowOrDate.getMinutes()).padStart(2, "0")}:${String(nowOrDate.getSeconds()).padStart(2, "0")}`
     : `${nowOrDate}T23:59:59`;
   const isOverdue = (dueDate: string) => `${normalizeDueDate(dueDate).slice(0, 16)}:00` < now;
+  const destinationId = board.columns.some((column) => column.id === "backlog")
+    ? "backlog"
+    : board.columns.find((column) => column.id !== "done")?.id;
+  if (!destinationId) return board;
   let changed = false;
   const columns = board.columns.map((column) => {
-    if (column.id === "backlog" || column.id === "done") {
+    if (column.id === destinationId || column.id === "done") {
       return column;
     }
 
@@ -395,13 +431,13 @@ export function moveOverdueCards(board: Board, nowOrDate: Date | string = new Da
   }
 
   const overdueCards = board.columns
-    .filter((column) => column.id !== "backlog" && column.id !== "done")
+    .filter((column) => column.id !== destinationId && column.id !== "done")
     .flatMap((column) => column.cards.filter((card) => card.dueDate && isOverdue(card.dueDate)));
 
   return {
     ...board,
     columns: columns.map((column) =>
-      column.id === "backlog"
+      column.id === destinationId
         ? { ...column, cards: sortCardsByPriority([...overdueCards, ...column.cards]) }
         : column,
     ),

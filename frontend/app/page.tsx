@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Check, MessageSquare, Pencil, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Trash2, X } from "lucide-react";
 import styles from "./page.module.css";
 import {
   addCardToColumn,
+  createEmptyBoard,
   createCardReference,
   createInitialBoard,
+  deleteColumn,
   deleteCard,
   formatBoardDate,
   formatCreatedDate,
@@ -114,43 +116,107 @@ async function recordOverdueCardMoves(before: Board, after: Board) {
 }
 
 const boardStorageKey = "kanban-board";
+const boardsStorageKey = "kanban-boards";
+const activeBoardStorageKey = "kanban-active-board";
 const teamProfileStorageKey = "kanban-team-profile";
-type TeamProfile = { name: string; logo: string; boardName: string; logoOnly: boolean };
+type SavedBoard = { id: string; name: string; board: Board };
+type TeamProfile = { name: string; logo: string; boardName: string; nameBold: boolean; nameSize: "board" | "small" | "large"; nameColor: string };
 const defaultTeamProfile: TeamProfile = {
   name: "Weekly Team",
   logo: "",
   boardName: "Weekly Task Kanban",
-  logoOnly: false,
+  nameBold: true,
+  nameSize: "board",
+  nameColor: "",
 };
+const initialBoard = createInitialBoard();
+const defaultBoardId = "team-board";
+const defaultSavedBoards: SavedBoard[] = [{ id: defaultBoardId, name: defaultTeamProfile.boardName, board: initialBoard }];
+let cachedSavedBoards = defaultSavedBoards;
+let cachedSavedBoardsValue: string | null | undefined;
 let cachedTeamProfile = defaultTeamProfile;
 let cachedTeamProfileValue: string | null | undefined;
 const teamProfileSubscribers = new Set<() => void>();
-const initialBoard = createInitialBoard();
-let cachedBoard: Board = initialBoard;
-let cachedBoardValue: string | null | undefined;
 const boardSubscribers = new Set<() => void>();
 const clockSubscribers = new Set<() => void>();
 let clockSnapshot: Date | null = null;
 let clockTimer: ReturnType<typeof setInterval> | undefined;
 
-function getBoardSnapshot(): Board {
+function getSavedBoardsSnapshot(): SavedBoard[] {
   if (typeof window === "undefined") {
-    return initialBoard;
+    return defaultSavedBoards;
   }
 
-  const serializedBoard = window.localStorage.getItem(boardStorageKey);
-  if (serializedBoard !== cachedBoardValue) {
-    cachedBoardValue = serializedBoard;
-    cachedBoard = parseBoard(serializedBoard) ?? initialBoard;
+  const serializedBoards = window.localStorage.getItem(boardsStorageKey);
+  if (serializedBoards !== cachedSavedBoardsValue) {
+    cachedSavedBoardsValue = serializedBoards;
+    if (serializedBoards) {
+      try {
+        const parsed: unknown = JSON.parse(serializedBoards);
+        cachedSavedBoards = Array.isArray(parsed)
+          ? parsed.flatMap((item): SavedBoard[] => {
+            if (typeof item !== "object" || item === null ||
+              !("id" in item) || typeof item.id !== "string" ||
+              !("name" in item) || typeof item.name !== "string" ||
+              !("board" in item)) return [];
+            const board = parseBoard(JSON.stringify(item.board));
+            return board ? [{ id: item.id, name: item.name, board }] : [];
+          })
+          : [];
+      } catch {
+        cachedSavedBoards = [];
+      }
+    } else {
+      let legacyName = defaultTeamProfile.boardName;
+      try {
+        const profile = JSON.parse(window.localStorage.getItem(teamProfileStorageKey) ?? "{}") as Partial<TeamProfile>;
+        if (typeof profile.boardName === "string" && profile.boardName.trim()) legacyName = profile.boardName.trim();
+      } catch {
+        legacyName = defaultTeamProfile.boardName;
+      }
+      cachedSavedBoards = [{
+        id: defaultBoardId,
+        name: legacyName,
+        board: parseBoard(window.localStorage.getItem(boardStorageKey)) ?? initialBoard,
+      }];
+      const migrated = JSON.stringify(cachedSavedBoards);
+      window.localStorage.setItem(boardsStorageKey, migrated);
+      cachedSavedBoardsValue = migrated;
+    }
+    if (cachedSavedBoards.length === 0) cachedSavedBoards = defaultSavedBoards;
   }
 
-  return cachedBoard;
+  return cachedSavedBoards;
+}
+
+function getActiveBoardIdSnapshot(): string {
+  if (typeof window === "undefined") return defaultBoardId;
+  const savedBoards = getSavedBoardsSnapshot();
+  const activeId = window.localStorage.getItem(activeBoardStorageKey);
+  if (activeId && savedBoards.some((item) => item.id === activeId)) return activeId;
+  const fallbackId = savedBoards[0].id;
+  window.localStorage.setItem(activeBoardStorageKey, fallbackId);
+  return fallbackId;
+}
+
+function getBoardSnapshot(): Board {
+  const activeBoardId = getActiveBoardIdSnapshot();
+  return getSavedBoardsSnapshot().find((item) => item.id === activeBoardId)?.board ?? initialBoard;
+}
+
+function saveBoardCollection(savedBoards: SavedBoard[], activeBoardId: string) {
+  const serializedBoards = JSON.stringify(savedBoards);
+  window.localStorage.setItem(boardsStorageKey, serializedBoards);
+  window.localStorage.setItem(activeBoardStorageKey, activeBoardId);
+  cachedSavedBoards = savedBoards;
+  cachedSavedBoardsValue = serializedBoards;
+  boardSubscribers.forEach((subscriber) => subscriber());
 }
 
 function subscribeToBoard(subscriber: () => void) {
   boardSubscribers.add(subscriber);
   const handleStorage = () => {
-    cachedBoardValue = undefined;
+    cachedSavedBoardsValue = undefined;
     subscriber();
   };
   window.addEventListener("storage", handleStorage);
@@ -213,12 +279,18 @@ function getTeamProfileSnapshot(): TeamProfile {
     try {
       const parsed = serializedProfile ? JSON.parse(serializedProfile) as Partial<TeamProfile> : {};
       cachedTeamProfile = {
-        name: typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : defaultTeamProfile.name,
+        name: typeof parsed.name === "string" ? parsed.name.trim() : defaultTeamProfile.name,
         logo: typeof parsed.logo === "string" ? parsed.logo : "",
         boardName: typeof parsed.boardName === "string" && parsed.boardName.trim()
           ? parsed.boardName.trim()
           : defaultTeamProfile.boardName,
-        logoOnly: typeof parsed.logoOnly === "boolean" ? parsed.logoOnly : false,
+        nameBold: typeof parsed.nameBold === "boolean" ? parsed.nameBold : defaultTeamProfile.nameBold,
+        nameSize: parsed.nameSize === "small" || parsed.nameSize === "large"
+          ? parsed.nameSize
+          : defaultTeamProfile.nameSize,
+        nameColor: typeof parsed.nameColor === "string" && /^#[\da-f]{6}$/i.test(parsed.nameColor)
+          ? parsed.nameColor
+          : defaultTeamProfile.nameColor,
       };
     } catch {
       cachedTeamProfile = defaultTeamProfile;
@@ -251,11 +323,11 @@ function saveTeamProfile(profile: TeamProfile) {
 
 function updateBoard(update: (current: Board) => Board) {
   const nextBoard = moveOverdueCards(update(getBoardSnapshot()));
-  const serializedBoard = JSON.stringify(nextBoard);
-  window.localStorage.setItem(boardStorageKey, serializedBoard);
-  cachedBoardValue = serializedBoard;
-  cachedBoard = nextBoard;
-  boardSubscribers.forEach((subscriber) => subscriber());
+  const activeBoardId = getActiveBoardIdSnapshot();
+  const savedBoards = getSavedBoardsSnapshot().map((item) => item.id === activeBoardId
+    ? { ...item, board: nextBoard }
+    : item);
+  saveBoardCollection(savedBoards, activeBoardId);
   syncBoard(nextBoard);
 }
 
@@ -288,6 +360,8 @@ const columnColors: Record<ColumnId, { background: string; border: string; accen
 };
 
 export default function Home() {
+  const savedBoards = useSyncExternalStore(subscribeToBoard, getSavedBoardsSnapshot, () => defaultSavedBoards);
+  const activeBoardId = useSyncExternalStore(subscribeToBoard, getActiveBoardIdSnapshot, () => defaultBoardId);
   const board = useSyncExternalStore(
     subscribeToBoard,
     getBoardSnapshot,
@@ -315,24 +389,29 @@ export default function Home() {
   } | null>(null);
   const [expandedCard, setExpandedCard] = useState<{
     cardId: string;
+    columnId: ColumnId;
     left: number;
     top: number;
     width: number;
+    height: number;
   } | null>(null);
   const [savingCardId, setSavingCardId] = useState<string | null>(null);
   const [openCommentCardId, setOpenCommentCardId] = useState<string | null>(null);
   const [commentDraft, setCommentDraft] = useState("");
   const commentsPanelRef = useRef<HTMLDivElement>(null);
   const [isAddingCard, setIsAddingCard] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [teamNameDraft, setTeamNameDraft] = useState("Weekly Team");
   const [teamLogoDraft, setTeamLogoDraft] = useState("");
-  const [teamLogoOnlyDraft, setTeamLogoOnlyDraft] = useState(false);
+  const [teamNameBoldDraft, setTeamNameBoldDraft] = useState(true);
+  const [teamNameSizeDraft, setTeamNameSizeDraft] = useState<TeamProfile["nameSize"]>("board");
+  const [teamNameColorDraft, setTeamNameColorDraft] = useState("");
   const [boardNameDraft, setBoardNameDraft] = useState("Weekly Task Kanban");
   const [customizeError, setCustomizeError] = useState("");
   const teamName = teamProfile.name;
   const teamLogo = teamProfile.logo;
-  const boardName = teamProfile.boardName;
+  const boardName = savedBoards.find((item) => item.id === activeBoardId)?.name ?? teamProfile.boardName;
 
   useEffect(() => {
     const currentBoard = getBoardSnapshot();
@@ -423,8 +502,9 @@ export default function Home() {
 
   const handleAddCard = async () => {
     const title = draft.title.trim();
+    const destination = board.columns.find((column) => column.id === "todo") ?? board.columns[0];
 
-    if (!title) {
+    if (!title || !destination) {
       return;
     }
 
@@ -446,10 +526,10 @@ export default function Home() {
       await recordCardChange({
         action: "Created",
         cardAfter: newCard,
-        columnAfter: newCard.dueDate && newCard.dueDate.slice(0, 10) < localDateString() ? "Backlog" : "To Do",
+        columnAfter: destination.title,
         changedFields: ["title", "details", "owner", "due on", "priority"],
       });
-      updateBoard((current) => addCardToColumn(current, "todo", newCard));
+      updateBoard((current) => addCardToColumn(current, destination.id, newCard));
       setDraft({ ...emptyDraft });
       setIsAddingCard(false);
     } catch (error) {
@@ -461,12 +541,18 @@ export default function Home() {
 
   const handleSaveTeamProfile = () => {
     const profile = {
-      name: teamNameDraft.trim() || "Weekly Team",
+      name: teamNameDraft.trim(),
       logo: teamLogoDraft,
       boardName: boardNameDraft.trim() || "Weekly Task Kanban",
-      logoOnly: teamLogoOnlyDraft && Boolean(teamLogoDraft),
+      nameBold: teamNameBoldDraft,
+      nameSize: teamNameSizeDraft,
+      nameColor: teamNameColorDraft,
     };
     try {
+      const activeId = getActiveBoardIdSnapshot();
+      saveBoardCollection(getSavedBoardsSnapshot().map((item) => item.id === activeId
+        ? { ...item, name: profile.boardName }
+        : item), activeId);
       saveTeamProfile(profile);
       setCustomizeError("");
       setCustomizeOpen(false);
@@ -491,6 +577,41 @@ export default function Home() {
 
   const handleRename = (columnId: ColumnId, title: string) => {
     updateBoard((current) => renameColumn(current, columnId, title));
+  };
+
+  const handleDeleteColumn = (columnId: ColumnId) => {
+    const column = board.columns.find((item) => item.id === columnId);
+    if (!column || board.columns.length <= 1) return;
+    const destination = board.columns.find((item) => item.id === "backlog" && item.id !== columnId)
+      ?? board.columns.find((item) => item.id !== columnId);
+    if (!destination) return;
+    const cardMessage = column.cards.length > 0
+      ? ` Its ${column.cards.length} cards will move to ${destination.title}.`
+      : "";
+    if (!window.confirm(`Delete the ${column.title} category?${cardMessage}`)) return;
+    updateBoard((current) => deleteColumn(current, columnId));
+  };
+
+  const handleAddBoard = () => {
+    const id = `board-${crypto.randomUUID()}`;
+    const name = `Board ${savedBoards.length + 1}`;
+    saveBoardCollection([...savedBoards, { id, name, board: createEmptyBoard() }], id);
+    setBoardNameDraft(name);
+    setExpandedCard(null);
+    setEditingCard(null);
+    setOpenCommentCardId(null);
+  };
+
+  const handleSwitchBoard = (direction: -1 | 1) => {
+    if (savedBoards.length < 2) return;
+    const currentIndex = savedBoards.findIndex((item) => item.id === activeBoardId);
+    const nextIndex = (currentIndex + direction + savedBoards.length) % savedBoards.length;
+    const nextBoard = savedBoards[nextIndex];
+    saveBoardCollection(savedBoards, nextBoard.id);
+    setBoardNameDraft(nextBoard.name);
+    setExpandedCard(null);
+    setEditingCard(null);
+    setOpenCommentCardId(null);
   };
 
   const handleDelete = async (columnId: ColumnId, cardId: string) => {
@@ -681,31 +802,39 @@ export default function Home() {
 
   return (
     <div className={styles.appShell}>
-      <aside className={styles.sidebar}>
-        <div className={styles.brand}>
-          {teamLogo ? (
-            <span className={styles.brandImage} style={{ backgroundImage: `url(${teamLogo})` }} role="img" aria-label={`${teamName} logo`} />
-          ) : (
-            <span className={styles.brandMark}>{teamName.slice(0, 1).toUpperCase()}</span>
-          )}
-          {teamLogo && teamProfile.logoOnly ? null : (
-          <button
-            type="button"
-            className={styles.teamName}
-            onDoubleClick={() => {
-              setTeamNameDraft(teamName);
-              setTeamLogoDraft(teamLogo);
-              setTeamLogoOnlyDraft(teamProfile.logoOnly);
-              setBoardNameDraft(boardName);
-              setCustomizeOpen(true);
-            }}
-            aria-label={`${teamName}. Double-click to customize`}
-            title="Double-click to customize"
-          >
-            {teamName}
-          </button>
-          )}
-        </div>
+      <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.sidebarCollapsed : ""}`}>
+        <button
+          type="button"
+          className={styles.sidebarCollapseButton}
+          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+        >
+          {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+        </button>
+        {teamLogo && (
+          <span
+            className={styles.companyLogo}
+            style={{ backgroundImage: `url(${teamLogo})` }}
+            role="img"
+            aria-label={`${teamName} company picture`}
+          />
+        )}
+        <section className={styles.boardSwitcher} aria-label="Boards">
+          <h2>Boards</h2>
+          <div className={styles.boardSwitchControls}>
+            <button type="button" aria-label="Previous board" title="Previous board" onClick={() => handleSwitchBoard(-1)} disabled={savedBoards.length < 2}>
+              <ChevronLeft size={17} />
+            </button>
+            <span title={boardName}>{boardName}</span>
+            <button type="button" aria-label="Next board" title="Next board" onClick={() => handleSwitchBoard(1)} disabled={savedBoards.length < 2}>
+              <ChevronRight size={17} />
+            </button>
+            <button type="button" aria-label="Add board" title="Add board" onClick={handleAddBoard}>
+              <Plus size={16} />
+            </button>
+          </div>
+        </section>
         <nav className={styles.sidebarNav} aria-label="Board actions">
           <a className={`${styles.navItem} ${styles.navItemActive}`} href="#board">
             <span aria-hidden="true">▦</span> Board
@@ -735,7 +864,9 @@ export default function Home() {
             onClick={() => {
               setTeamNameDraft(teamName);
               setTeamLogoDraft(teamLogo);
-              setTeamLogoOnlyDraft(teamProfile.logoOnly);
+              setTeamNameBoldDraft(teamProfile.nameBold);
+              setTeamNameSizeDraft(teamProfile.nameSize);
+              setTeamNameColorDraft(teamProfile.nameColor);
               setBoardNameDraft(boardName);
               setCustomizeOpen((open) => !open);
               setCustomizeError("");
@@ -777,6 +908,37 @@ export default function Home() {
             <h2>Customize</h2>
             <label htmlFor="team-name">Team label</label>
             <input id="team-name" value={teamNameDraft} onChange={(event) => setTeamNameDraft(event.target.value)} maxLength={40} />
+            <label className={styles.companyNameOption}>
+              <input
+                type="checkbox"
+                aria-label="Bold company name"
+                checked={teamNameBoldDraft}
+                onChange={(event) => setTeamNameBoldDraft(event.target.checked)}
+              />
+              Bold company name
+            </label>
+            <label htmlFor="company-name-size">Company name size</label>
+            <select
+              id="company-name-size"
+              value={teamNameSizeDraft}
+              onChange={(event) => setTeamNameSizeDraft(event.target.value as TeamProfile["nameSize"])}
+            >
+              <option value="board">Like board name</option>
+              <option value="small">Small</option>
+              <option value="large">Large</option>
+            </select>
+            <label htmlFor="company-name-color">Company name color</label>
+            <input
+              id="company-name-color"
+              type="color"
+              value={teamNameColorDraft || "#209dd7"}
+              onChange={(event) => setTeamNameColorDraft(event.target.value)}
+            />
+            {teamNameColorDraft && (
+              <button type="button" className={styles.removeLogoButton} onClick={() => setTeamNameColorDraft("")}>
+                Use board colors
+              </button>
+            )}
             <label htmlFor="board-name">Board name</label>
             <input id="board-name" value={boardNameDraft} onChange={(event) => setBoardNameDraft(event.target.value)} maxLength={60} />
             <label className={styles.uploadLogoButton}>
@@ -784,15 +946,27 @@ export default function Home() {
               <input type="file" accept="image/*" onChange={(event) => handleTeamLogo(event.target.files?.[0])} />
             </label>
             {teamLogoDraft && <button type="button" className={styles.removeLogoButton} onClick={() => setTeamLogoDraft("")}>Remove logo</button>}
-            <label className={styles.logoOnlyOption}>
-              <input
-                type="checkbox"
-                checked={teamLogoOnlyDraft}
-                disabled={!teamLogoDraft}
-                onChange={(event) => setTeamLogoOnlyDraft(event.target.checked)}
-              />
-              Show logo instead of label
-            </label>
+            <h3 className={styles.categoryManagementTitle}>Categories</h3>
+            <div className={styles.categoryManagement}>
+              {board.columns.map((column) => (
+                <div key={column.id} className={styles.categoryManagementRow}>
+                  <input
+                    aria-label={`Rename ${column.title} category`}
+                    value={column.title}
+                    onChange={(event) => handleRename(column.id, event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    aria-label={`Delete ${column.title} category`}
+                    title="Delete category"
+                    onClick={() => handleDeleteColumn(column.id)}
+                    disabled={board.columns.length <= 1}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
             {customizeError && <p role="alert" className={styles.customizeError}>{customizeError}</p>}
             <button type="button" className={styles.createCardButton} onClick={handleSaveTeamProfile}>Save</button>
           </section>
@@ -805,6 +979,22 @@ export default function Home() {
 
       <main className={styles.workspace} id="board">
         <header className={styles.header}>
+          <div className={styles.projectEyebrow}>
+            <span
+              className={styles.companyNameLabel}
+              data-size={teamProfile.nameSize}
+              style={{
+                fontWeight: teamProfile.nameBold ? 700 : 500,
+                ...(teamProfile.nameColor ? {
+                  color: teamProfile.nameColor,
+                  backgroundImage: "none",
+                  WebkitTextFillColor: teamProfile.nameColor,
+                } : {}),
+              }}
+            >
+              {teamName}
+            </span>
+          </div>
           <div className={styles.headingBlock}>
             <p className={styles.eyebrow}>Project board</p>
             <h1>{boardName}</h1>
@@ -865,7 +1055,10 @@ export default function Home() {
             </div>
 
             <div className={styles.cardList}>
-              {column.cards.map((card, cardIndex) => {
+              {column.cards
+                .filter((card) => !expandedCard || expandedCard.columnId !== column.id || expandedCard.cardId === card.id)
+                .map((card) => {
+                const cardIndex = column.cards.findIndex((item) => item.id === card.id);
                 const isEditing = editingCard?.cardId === card.id;
                 const owners = (card.assignee ?? "").split(",").map((owner) => owner.trim()).filter(Boolean);
                 const isExpanded = expandedCard?.cardId === card.id;
@@ -884,6 +1077,7 @@ export default function Home() {
                     left: expandedCard.left,
                     top: expandedCard.top,
                     width: expandedCard.width,
+                    height: expandedCard.height,
                   } : undefined}
                   draggable={!isEditing && openCommentCardId !== card.id}
                   onClick={(event) => {
@@ -896,9 +1090,11 @@ export default function Home() {
                     const width = Math.min(bounds.width * 1.9, window.innerWidth - 32);
                     setExpandedCard({
                       cardId: card.id,
+                      columnId: column.id,
                       width,
+                      height: Math.min(bounds.height * 1.9, window.innerHeight - 32),
                       left: Math.max(16, Math.min(bounds.left, window.innerWidth - width - 16)),
-                      top: Math.max(16, Math.min(bounds.top, window.innerHeight * 0.3)),
+                      top: Math.max(16, Math.min(bounds.top - (Math.min(bounds.height * 1.9, window.innerHeight - 32) - bounds.height) / 2, window.innerHeight - Math.min(bounds.height * 1.9, window.innerHeight - 32) - 16)),
                     });
                   }}
                   onDragOver={(event) => event.preventDefault()}

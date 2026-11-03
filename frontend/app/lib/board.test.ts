@@ -3,6 +3,7 @@ import {
   addCardToColumn,
   createInitialBoard,
   createCardReference,
+  deleteColumn,
   deleteCard,
   formatBoardDate,
   formatCreatedDate,
@@ -39,6 +40,33 @@ describe("kanban board logic", () => {
   it("ignores invalid saved board data", () => {
     expect(parseBoard("not json")).toBeNull();
     expect(parseBoard(JSON.stringify({ columns: [] }))).toBeNull();
+  });
+
+  it("restores a board with categories removed", () => {
+    const board = deleteColumn(createInitialBoard(), "todo");
+
+    expect(parseBoard(JSON.stringify(board))?.columns.map((column) => column.id)).toEqual([
+      "backlog",
+      "in-progress",
+      "review",
+      "done",
+    ]);
+  });
+
+  it("moves cards from a deleted category into Backlog", () => {
+    const board = createInitialBoard();
+    const removedCardId = board.columns[1].cards[0].id;
+    const updated = deleteColumn(board, "todo");
+
+    expect(updated.columns).toHaveLength(4);
+    expect(updated.columns[0].cards.some((card) => card.id === removedCardId)).toBe(true);
+  });
+
+  it("does not delete the final category", () => {
+    const board = deleteColumn(createInitialBoard(), "backlog");
+    const lastCategoryBoard = { columns: [board.columns[0]] };
+
+    expect(deleteColumn(lastCategoryBoard, board.columns[0].id)).toBe(lastCategoryBoard);
   });
 
   it("renames a column", () => {

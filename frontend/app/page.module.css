@@ -20,61 +20,108 @@
   backdrop-filter: blur(18px);
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  min-width: 0;
-  color: #032147;
-  font-size: 0.72rem;
-  font-weight: 800;
-  line-height: 1.35;
-  letter-spacing: 0.08em;
-}
-
-.brandMark {
+.sidebarCollapseButton {
   display: grid;
-  width: 38px;
-  aspect-ratio: 1;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
   place-items: center;
-  border: 1px solid rgba(32, 157, 215, 0.28);
-  border-radius: 12px;
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(211, 239, 249, 0.78));
-  box-shadow: 0 5px 16px rgba(3, 33, 71, 0.1);
-  color: #167eac;
-  font-size: 1.1rem;
+  align-self: flex-end;
+  margin: -10px -8px 14px 0;
+  border: 1px solid rgba(3, 33, 71, 0.1);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.8);
+  color: #35556a;
+  cursor: pointer;
 }
 
-.brandImage {
-  display: block;
-  flex: 0 0 38px;
-  width: 38px;
-  aspect-ratio: 1;
-  border: 1px solid rgba(32, 157, 215, 0.24);
-  border-radius: 12px;
-  background-position: center;
-  background-size: cover;
-  box-shadow: 0 5px 16px rgba(3, 33, 71, 0.1);
+.sidebarCollapseButton:hover,
+.boardSwitchControls button:hover:not(:disabled),
+.categoryManagementRow button:hover:not(:disabled) {
+  border-color: rgba(32, 157, 215, 0.35);
+  background: #fff;
+  color: #126d95;
 }
 
-.teamName {
-  display: inline-flex;
-  min-width: 0;
+.sidebarCollapsed {
+  flex-basis: 60px;
   align-items: center;
-  overflow: hidden;
-  padding: 6px 9px;
-  border: 1px solid rgba(236, 173, 10, 0.26);
+  padding: 14px 10px;
+}
+
+.sidebarCollapsed .sidebarCollapseButton {
+  align-self: center;
+  margin: 0;
+}
+
+.sidebarCollapsed .companyLogo,
+.sidebarCollapsed .boardSwitcher,
+.sidebarCollapsed .sidebarNav,
+.sidebarCollapsed .sidebarForm,
+.sidebarCollapsed .customizePanel,
+.sidebarCollapsed .sidebarFoot {
+  display: none;
+}
+
+.boardSwitcher {
+  display: grid;
+  gap: 7px;
+  margin-top: 16px;
+}
+
+.boardSwitcher h2 {
+  color: #687a88;
+  font-size: 0.66rem;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.boardSwitchControls {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px 28px;
+  align-items: center;
+  gap: 3px;
+}
+
+.boardSwitchControls button,
+.categoryManagementRow button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgba(3, 33, 71, 0.1);
   border-radius: 6px;
-  background: rgba(236, 173, 10, 0.1);
-  color: #032147;
-  font: inherit;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0;
-  text-align: left;
+  background: rgba(255, 255, 255, 0.78);
+  color: #456175;
+  cursor: pointer;
+}
+
+.boardSwitchControls button:disabled,
+.categoryManagementRow button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.boardSwitchControls span {
+  overflow: hidden;
+  color: #183a55;
+  font-size: 0.68rem;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
+}
+
+.companyLogo {
+  display: block;
+  width: 100%;
+  height: 82px;
+  flex: 0 0 auto;
+  margin: 4px 0 8px;
+  border-radius: 7px;
+  background-color: rgba(255, 255, 255, 0.55);
+  background-position: left center;
+  background-repeat: no-repeat;
+  background-size: contain;
 }
 
 .sidebarNav {
@@ -164,7 +211,8 @@
 .sidebarForm input,
 .sidebarForm textarea,
 .sidebarForm select,
-.customizePanel > input {
+.customizePanel > input,
+.customizePanel > select {
   width: 100%;
   min-width: 0;
   padding: 8px;
@@ -176,18 +224,56 @@
   font-size: 0.75rem;
 }
 
-.customizePanel .logoOnlyOption {
+.customizePanel > input[type="color"] {
+  width: 48px;
+  height: 36px;
+  padding: 3px;
+  cursor: pointer;
+}
+
+.companyNameOption {
   display: flex;
   align-items: center;
   gap: 7px;
   color: #586b7b;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
 }
 
-.logoOnlyOption input {
+.companyNameOption input {
   width: 15px;
   height: 15px;
   accent-color: #209dd7;
+}
+
+.categoryManagementTitle {
+  margin-top: 5px;
+  color: #183a55;
+  font-size: 0.78rem;
+}
+
+.categoryManagement {
+  display: grid;
+  gap: 5px;
+}
+
+.categoryManagementRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 5px;
+}
+
+.categoryManagementRow input {
+  width: 100%;
+  min-width: 0;
+  height: 29px;
+  padding: 4px 7px;
+  border: 1px solid rgba(3, 33, 71, 0.12);
+  border-radius: 5px;
+  background: #fff;
+  color: #243e51;
+  font: inherit;
+  font-size: 0.7rem;
 }
 
 .sidebarForm textarea { resize: vertical; }
@@ -242,23 +328,66 @@
 
 .header {
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
   max-width: 1600px;
   min-height: 96px;
-  align-items: center;
-  justify-content: center;
-  gap: 24px;
+  align-items: start;
+  gap: 2px 24px;
   margin: 0 auto 30px;
 }
 
 .headingBlock {
   display: grid;
-  max-width: min(100%, calc(100% - 130px));
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+  max-width: 100%;
+  justify-self: center;
   justify-items: center;
   text-align: center;
 }
 
+.projectEyebrow {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  width: calc(100% - 70px);
+  max-width: 1500px;
+  align-items: flex-start;
+  gap: 9px;
+  margin-left: max(0px, calc((100% - 1500px) / 2));
+}
+
+.companyNameLabel {
+  display: inline-block;
+  max-width: calc(100% - 110px);
+  overflow: hidden;
+  flex: 0 1 auto;
+  min-width: 1rem;
+  min-height: 1em;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #032147;
+  font: inherit;
+  font-size: 2.35rem;
+  line-height: 1.1;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background-image: linear-gradient(135deg, #209dd7 0%, #753991 40%, #ecad0a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.companyNameLabel[data-size="small"] { font-size: 1.65rem; }
+.companyNameLabel[data-size="large"] { font-size: 2.8rem; }
+
 .eyebrow {
+  flex: 0 0 auto;
   margin-bottom: 8px;
   color: #209dd7;
   font-size: 12px;
@@ -301,8 +430,11 @@
   box-shadow: inset 0 1px 0 #fff, 0 9px 22px rgba(3, 33, 71, 0.14);
   backdrop-filter: blur(12px);
   color: #4c687a;
-  position: absolute;
-  right: 0;
+  position: static;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  justify-self: end;
 }
 
 .clockFace {
@@ -418,7 +550,10 @@
 
 .board {
   display: grid;
-  grid-template-columns: repeat(5, minmax(185px, 1fr));
+  grid-template-columns: none;
+  grid-template-rows: 1fr;
+  grid-auto-columns: minmax(230px, 1fr);
+  grid-auto-flow: column;
   gap: 16px;
   max-width: 1600px;
   margin: 0 auto;
@@ -478,7 +613,10 @@
 
 .board {
   display: grid;
-  grid-template-columns: repeat(5, minmax(230px, 1fr));
+  grid-template-columns: none;
+  grid-template-rows: 1fr;
+  grid-auto-columns: minmax(230px, 1fr);
+  grid-auto-flow: column;
   gap: 18px;
   max-width: 1500px;
   margin: 0 auto;
@@ -1014,7 +1152,7 @@
   .workspace { padding-inline: 22px; }
 
   .board {
-    grid-template-columns: repeat(5, minmax(230px, 1fr));
+    grid-auto-columns: minmax(230px, 1fr);
   }
 }
 
@@ -1067,6 +1205,8 @@
 
   .header {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
     justify-items: center;
     gap: 10px;
     margin-bottom: 22px;
@@ -1074,10 +1214,31 @@
 
   .clockBlock {
     position: static;
+    grid-column: 1;
+    grid-row: 3;
+    justify-self: center;
     gap: 10px;
   }
 
+  .projectEyebrow {
+    grid-column: 1;
+    grid-row: 1;
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+  }
+
+  .headingBlock {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .companyNameLabel { max-width: calc(100% - 110px); }
+
   .header h1 { font-size: 1.65rem; }
+  .companyNameLabel[data-size="board"] { font-size: 1.65rem; }
+  .companyNameLabel[data-size="small"] { font-size: 1.3rem; }
+  .companyNameLabel[data-size="large"] { font-size: 2rem; }
   .eyebrow { font-size: 0.65rem; }
   .dateStamp { font-size: 0.92rem; }
   .clockBlock { gap: 7px; }
@@ -1087,7 +1248,7 @@
   .clockReadout { min-width: 0; font-size: 0.65rem; }
 
   .board {
-    grid-template-columns: repeat(5, minmax(250px, 84vw));
+    grid-auto-columns: minmax(250px, 84vw);
     gap: 12px;
     margin-inline: -2px;
     padding: 0 2px 14px;
